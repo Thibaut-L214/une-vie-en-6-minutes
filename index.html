@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Une vie en 6 minutes</title>
+  <meta name="description" content="Suivez la vie de Rosa, un cochon d'élevage, de sa naissance à ses 6 mois.">
+  <meta name="theme-color" content="#121110">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div id="blackout" aria-hidden="true"></div>
+
+  <div id="hud" aria-hidden="true">
+    <span id="hud-label"></span>
+    <div class="hud-track"><div id="hud-fill"></div></div>
+  </div>
+
+  <main id="story"></main>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

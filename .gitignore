@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Éditeurs
+.idea/
+.vscode/
+*.swp
+
+# Dépendances et builds (pour les futurs jeux avec un bundler)
+node_modules/
+dist/
+.vite/
+
+# Environnement et logs
+.env
+.env.*
+*.log
+
+# Claude Code : réglages personnels (launch.json reste partagé)
+.claude/settings.local.json
+.codegraph/

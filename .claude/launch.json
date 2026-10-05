@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "une-vie-en-6-minutes",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5214", "--directory", "une-vie-en-6-minutes"],
+      "port": 5214
+    }
+  ]
+}

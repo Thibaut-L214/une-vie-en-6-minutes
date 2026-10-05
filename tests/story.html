@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tests du récit</title>
+  <style>
+    iframe { display: block; width: 390px; height: 844px; border: 0; }
+  </style>
+</head>
+<body>
+  <pre id="result">Tests en cours…</pre>
+  <div id="fixture"></div>
+  <script type="module">
+    const tests = [];
+    const test = (name, assertion) => tests.push({ name, assertion });
+    const assert = (condition, message) => { if (!condition) throw new Error(message); };
+    const root = new URL('../', location.href);
+    const source = await (await fetch(new URL('index.html', root), { cache: 'no-store' })).text();
+
+    async function loadStory({ withoutThree = false, width = 390, height = 844 } = {}) {
+      const frame = document.createElement('iframe');
+      frame.title = 'Récit utilisé par les tests';
+      frame.style.width = `${width}px`;
+      frame.style.height = `${height}px`;
+      const page = new DOMParser().parseFromString(source, 'text/html');
+      const base = page.createElement('base');
+      base.href = root;
+      page.head.prepend(base);
+      const run = Date.now();
+      page.querySelector('script[type="module"]').src = new URL(`src/main.js?run=${run}`, root);
+      page.querySelector('link[rel="stylesheet"]').href = new URL(`style.css?run=${run}`, root);
+      const mapElement = page.querySelector('script[type="importmap"]');
+      const map = JSON.parse(mapElement.textContent);
+      for (const name of ['chapters.js', 'animation.js']) {
+        map.imports[new URL(`src/${name}`, root)] = new URL(`src/${name}?run=${run}`, root).href;
+      }
+      if (withoutThree) {
+        // Simule une panne des dépendances externes, sans connexion au CDN.
+        map.imports.three = 'data:text/javascript,throw%20new%20Error(%22three%20indisponible%22)';
+        map.imports['three/addons/'] = new URL('tests/unavailable/', root).href;
+      }
+      mapElement.textContent = JSON.stringify(map);
+      const loaded = new Promise((resolve) => { frame.onload = resolve; });
+      frame.srcdoc = '<!doctype html>' + page.documentElement.outerHTML;
+      document.getElementById('fixture').replaceChildren(frame);
+      await loaded;
+      return { document: frame.contentDocument, window: frame.contentWindow };
+    }
+
+    async function waitFor(condition, message) {
+      const deadline = performance.now() + 5000;
+      while (!condition()) {
+        if (performance.now() > deadline) throw new Error(message);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+
+    test('une panne de three.js conserve le récit et le bouton de retour', async () => {
+      const { document: doc, window: win } = await loadStory({ withoutThree: true });
+      const count = doc.querySelectorAll('.chapter').length;
+      assert(count === 10, `${count} chapitres au lieu de 10`);
+      await waitFor(() => doc.body.classList.contains('no-webgl'), 'le mode texte ne s’active pas');
+      doc.documentElement.style.scrollBehavior = 'auto';
+      win.scrollTo({ top: doc.body.scrollHeight, behavior: 'instant' });
+      doc.querySelector('[data-action="restart"]').click();
+      await waitFor(() => win.scrollY === 0, 'le bouton ne revient pas au début');
+      assert(doc.activeElement === doc.querySelector('h1'), 'le titre initial ne reçoit pas le focus');
+    });
+
+    test('l’épilogue conserve une comparaison accessible sans la jauge 3D', async () => {
+      const { document: doc, window: win } = await loadStory({ withoutThree: true });
+      const comparison = [...doc.querySelectorAll('.chapter--epilogue p')]
+        .find((element) => element.textContent.includes('6 mois sur 15 ans possibles'));
+      assert(comparison, 'la comparaison manque dans le récit HTML');
+      for (let element = comparison; element; element = element.parentElement) {
+        const style = win.getComputedStyle(element);
+        assert(element.getAttribute('aria-hidden') !== 'true'
+          && !element.hidden && style.display !== 'none' && style.visibility !== 'hidden',
+          'la comparaison est masquée aux technologies d’assistance');
+      }
+    });
+
+    test('la scène attend la sortie du texte sur mobile, desktop et avec le texte agrandi', async () => {
+      for (const viewport of [
+        { width: 390, height: 844 },
+        { width: 1440, height: 900 },
+        { width: 320, height: 568, largeText: true },
+      ]) {
+        const { document: doc, window: win } = await loadStory(viewport);
+        await waitFor(() => doc.querySelector('#hud-label').textContent, 'la scène 3D ne démarre pas');
+        if (viewport.largeText) doc.documentElement.style.fontSize = '32px';
+        doc.documentElement.style.scrollBehavior = 'auto';
+        const card = doc.querySelector('.chapter--premiers-jours .card');
+        const nextCard = doc.querySelector('.chapter--sevrage .card');
+        const visiblePosition = card.getBoundingClientRect().bottom + win.scrollY - 100;
+        const label = () => doc.querySelector('#hud-label').textContent;
+        const scrollTo = async (top) => {
+          win.scrollTo({ top, behavior: 'instant' });
+          await new Promise((resolve) => win.requestAnimationFrame(resolve));
+          await new Promise((resolve) => win.requestAnimationFrame(resolve));
+        };
+        await scrollTo(visiblePosition);
+        assert(card.getBoundingClientRect().bottom > 0, 'le texte du test n’est plus visible');
+        assert(label() === 'Rosa · jour 5 / 180', `texte encore visible à ${viewport.width}px : ${label()}`);
+
+        const start = card.getBoundingClientRect().bottom + win.scrollY;
+        const end = nextCard.getBoundingClientRect().top + win.scrollY - win.innerHeight;
+        assert(end > start, 'aucun espace pour la transition entre les textes');
+        // Le navigateur arrondit scrollY : dépasser le milieu évite le seuil exact de 16,5 jours.
+        await scrollTo((start + end) / 2 + 1);
+        assert(label() === 'Rosa · jour 17 / 180', `milieu de transition : ${label()}`);
+        await scrollTo(end + 2);
+        assert(label() === 'Rosa · jour 28 / 180', `le texte du sevrage entre avec ${label()}`);
+        await scrollTo(visiblePosition);
+        assert(label() === 'Rosa · jour 5 / 180', `retour en arrière : ${label()}`);
+      }
+    });
+
+    const failures = [];
+    for (const { name, assertion } of tests) {
+      try { await assertion(); }
+      catch (error) { failures.push(`${name}\n  ${error.message}`); }
+    }
+    const result = document.getElementById('result');
+    result.dataset.status = failures.length ? 'failed' : 'passed';
+    result.textContent = failures.length
+      ? `ÉCHEC ${failures.length}/${tests.length}\n\n${failures.join('\n\n')}`
+      : `SUCCÈS ${tests.length}/${tests.length}`;
+  </script>
+</body>
+</html>

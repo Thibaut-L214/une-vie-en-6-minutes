@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Test du design des cochons</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <pre id="result">Tests en cours…</pre>
+  <script type="module">
+    import * as THREE from 'three';
+    const { applyPigMorphs, pigGeometry, rosaGeometries } = await import(`../src/pig.js?run=${Date.now()}`);
+
+    const tests = [];
+    const test = (name, assertion) => tests.push({ name, assertion });
+    const color = (hex) => new THREE.Color(hex);
+    const sameColor = (attribute, index, expected) =>
+      Math.abs(attribute.getX(index) - expected.r) < 0.0001
+      && Math.abs(attribute.getY(index) - expected.g) < 0.0001
+      && Math.abs(attribute.getZ(index) - expected.b) < 0.0001;
+    const influencesFor = (geometry, youth, lids) => {
+      const target = { morphTargetInfluences: Array(geometry.morphAttributes.position.length).fill(0) };
+      applyPigMorphs(target, youth, lids);
+      return target.morphTargetInfluences;
+    };
+    const morphedPosition = (geometry, index, influences) => {
+      const position = new THREE.Vector3().fromBufferAttribute(geometry.getAttribute('position'), index);
+      geometry.morphAttributes.position.forEach((morph, morphIndex) => {
+        position.x += morph.getX(index) * influences[morphIndex];
+        position.y += morph.getY(index) * influences[morphIndex];
+        position.z += morph.getZ(index) * influences[morphIndex];
+      });
+      return position;
+    };
+
+    test('pig.js expose une interface unique pour appliquer les morphs', () => {
+      if (typeof applyPigMorphs !== 'function') throw new Error('applyPigMorphs manque');
+    });
+
+    test('les yeux adultes ne montrent que de petits reflets blancs', () => {
+      const colors = pigGeometry().getAttribute('color');
+      let brightVertices = 0;
+      for (let i = 0; i < colors.count; i++) {
+        if (colors.getX(i) > 0.8 && colors.getY(i) > 0.8 && colors.getZ(i) > 0.8) brightVertices++;
+      }
+      if (brightVertices > 150) throw new Error(`${brightVertices} sommets blancs, maximum attendu : 150`);
+    });
+
+    test('les morph targets conservent le nombre de sommets de la géométrie', () => {
+      for (const geometry of [pigGeometry(), rosaGeometries().head]) {
+        const vertices = geometry.getAttribute('position').count;
+        if (geometry.morphAttributes.position.length !== 5) throw new Error('cinq morph targets attendues');
+        for (const morph of geometry.morphAttributes.position) {
+          if (morph.count !== vertices) throw new Error(`${morph.count} sommets au lieu de ${vertices}`);
+        }
+      }
+    });
+
+    test('la paupière supérieure assure la majeure partie de la fermeture', () => {
+      const geometry = pigGeometry();
+      const influences = influencesFor(geometry, 0, 1);
+      let upward = 0;
+      let downward = 0;
+      for (let i = 0; i < geometry.getAttribute('position').count; i++) {
+        let y = 0;
+        geometry.morphAttributes.position.forEach((morph, morphIndex) => {
+          y += morph.getY(i) * influences[morphIndex];
+        });
+        if (y > 0.0001) upward++;
+        if (y < -0.0001) downward++;
+      }
+      if (downward === 0) throw new Error('aucun sommet ne descend');
+      if (downward < upward * 2) throw new Error(`${downward} déplacements vers le bas pour ${upward} vers le haut`);
+    });
+
+    test('les deux paupières présentent leur face extérieure', () => {
+      const geometry = pigGeometry();
+      const positions = geometry.getAttribute('position');
+      const normals = geometry.getAttribute('normal');
+      const colors = geometry.getAttribute('color');
+      const lidColor = color('#d9918d');
+      const up = new THREE.Vector3(0, 1, 0);
+      let outward = 0;
+      let inward = 0;
+
+      for (let i = 0; i < positions.count; i++) {
+        if (!sameColor(colors, i, lidColor)) continue;
+        const side = positions.getZ(i) < 0 ? -1 : 1;
+        const direction = new THREE.Vector3(0.5, 0.38, 0.78 * side).normalize();
+        const horizontal = new THREE.Vector3().crossVectors(up, direction).normalize();
+        const vertical = new THREE.Vector3().crossVectors(direction, horizontal).normalize();
+        const eyeCenter = new THREE.Vector3(0.56, 0.7, 0).addScaledVector(direction, 0.27);
+        const position = new THREE.Vector3().fromBufferAttribute(positions, i).sub(eyeCenter);
+        if (position.dot(vertical) > -0.01) continue;
+        const normal = new THREE.Vector3().fromBufferAttribute(normals, i);
+        if (normal.dot(direction) > 0) outward++;
+        else inward++;
+      }
+
+      if (outward === 0 || inward > 0) throw new Error(`${outward} normales extérieures, ${inward} intérieures`);
+    });
+
+    test('les paupières restent devant les iris adultes et juvéniles', () => {
+      const lidColor = color('#d9918d');
+      const up = new THREE.Vector3(0, 1, 0);
+      const adult = { headX: 0.56, headY: 0.7, head: 1, eye: 0.82 };
+      const piglet = { headX: 0.52, headY: 0.68, head: 1.22, eye: 1.12 };
+      const neckPivot = (p) => new THREE.Vector3(p.headX - 0.3 * p.head * 0.55, p.headY - 0.02, 0);
+      const cases = [
+        { name: 'adulte', geometry: pigGeometry(), youth: 0, proportions: adult, pivot: new THREE.Vector3() },
+        { name: 'porcelet', geometry: pigGeometry(), youth: 1, proportions: piglet, pivot: new THREE.Vector3() },
+        { name: 'tête de Rosa adulte', geometry: rosaGeometries().head, youth: 0, proportions: adult, pivot: neckPivot(adult) },
+        { name: 'tête de Rosa porcelet', geometry: rosaGeometries().head, youth: 1, proportions: piglet, pivot: neckPivot(piglet) },
+      ];
+
+      for (const { name, geometry, youth, proportions, pivot } of cases) {
+        const colors = geometry.getAttribute('color');
+        const eyeRadius = 0.07 * proportions.eye;
+        for (const lids of [0.5, 0.6, 1]) {
+          const influences = influencesFor(geometry, youth, lids);
+          for (const side of [-1, 1]) {
+            const direction = new THREE.Vector3(0.5, 0.38, 0.78 * side).normalize();
+            const eyeCenter = new THREE.Vector3(proportions.headX, proportions.headY, 0)
+              .addScaledVector(direction, 0.3 * proportions.head * 0.9)
+              .sub(pivot);
+            const ray = new THREE.Ray(eyeCenter, direction);
+            const intersection = new THREE.Vector3();
+            const index = geometry.getIndex();
+            let coversCenter = false;
+
+            for (let i = 0; i < (index ? index.count : geometry.getAttribute('position').count); i += 3) {
+              const aIndex = index ? index.getX(i) : i;
+              const bIndex = index ? index.getX(i + 1) : i + 1;
+              const cIndex = index ? index.getX(i + 2) : i + 2;
+              if (!sameColor(colors, aIndex, lidColor)
+                || !sameColor(colors, bIndex, lidColor)
+                || !sameColor(colors, cIndex, lidColor)) continue;
+
+              const a = morphedPosition(geometry, aIndex, influences);
+              const b = morphedPosition(geometry, bIndex, influences);
+              const c = morphedPosition(geometry, cIndex, influences);
+              if (ray.intersectTriangle(a, b, c, false, intersection)
+                && intersection.distanceTo(eyeCenter) > eyeRadius * 1.05) {
+                coversCenter = true;
+                break;
+              }
+            }
+
+            if (!coversCenter) throw new Error(`${name}, paupières ${lids}, œil ${side < 0 ? 'gauche' : 'droit'} découvert`);
+          }
+        }
+      }
+    });
+
+    test('la face interne de chaque oreille atteint la surface externe', () => {
+      const geometry = pigGeometry();
+      const positions = geometry.getAttribute('position');
+      const colors = geometry.getAttribute('color');
+      const earColor = color('#e99d98');
+      const innerColor = color('#c97976');
+
+      for (const side of [-1, 1]) {
+        let outerEdge = -Infinity;
+        let innerEdge = -Infinity;
+        for (let i = 0; i < positions.count; i++) {
+          const lateral = positions.getZ(i) * side;
+          if (sameColor(colors, i, earColor)) outerEdge = Math.max(outerEdge, lateral);
+          if (sameColor(colors, i, innerColor)) innerEdge = Math.max(innerEdge, lateral);
+        }
+        if (innerEdge < outerEdge - 0.002) throw new Error(`oreille ${side < 0 ? 'gauche' : 'droite'} : face interne sous la surface`);
+      }
+    });
+
+    const failures = [];
+    for (const { name, assertion } of tests) {
+      try {
+        assertion();
+      } catch (error) {
+        failures.push(`${name}\n  ${error.message}`);
+      }
+    }
+
+    const result = document.getElementById('result');
+    if (failures.length) {
+      result.dataset.status = 'failed';
+      result.textContent = `ÉCHEC ${failures.length}/${tests.length}\n\n${failures.join('\n\n')}`;
+    } else {
+      result.dataset.status = 'passed';
+      result.textContent = `SUCCÈS ${tests.length}/${tests.length}`;
+    }
+  </script>
+</body>
+</html>
