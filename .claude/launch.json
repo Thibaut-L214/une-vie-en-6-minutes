@@ -4,7 +4,7 @@
     {
       "name": "une-vie-en-6-minutes",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "5214", "--directory", "une-vie-en-6-minutes"],
+      "runtimeArgs": ["-m", "http.server", "5214"],
       "port": 5214
     }
   ]
